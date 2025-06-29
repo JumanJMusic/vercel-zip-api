@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
-  "type": "module",
+ 
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0",
     "adm-zip": "^0.5.9",
