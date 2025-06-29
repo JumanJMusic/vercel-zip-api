@@ -25,6 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    // 🔹 Récupération des pistes
     const { data: tracks, error } = await supabase
       .from('tracks')
       .select('id, title, track_number')
@@ -39,11 +40,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const track of tracks) {
       const wavPath = `${track.id}.wav`;
-      const { data: wavFile } = await supabase.storage
+
+      const { data: wavFile, error: downloadError } = await supabase.storage
         .from('audio-files')
         .download(wavPath);
 
-      if (!wavFile) continue;
+      if (downloadError || !wavFile) continue;
 
       const wavTempPath = path.join(tempDir, `${track.id}.wav`);
       const mp3TempPath = path.join(tempDir, `${track.track_number} - ${track.title}.mp3`);
@@ -63,6 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       zip.addLocalFile(mp3TempPath, '', `${track.track_number} - ${track.title}.mp3`);
     }
 
+    // 🔹 Upload archive
     const zipBuffer = zip.toBuffer();
     const zipName = `${albumId}.zip`;
 
@@ -70,29 +73,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('archives')
       .upload(zipName, zipBuffer, {
         contentType: 'application/zip',
-        upsert: true,
+        upsert: true
       });
 
     if (uploadError) throw uploadError;
 
-    const { data: signed } = await supabase.storage
+    const { data: signed, error: signError } = await supabase.storage
       .from('archives')
       .createSignedUrl(zipName, 900); // 15 min
 
-    // Enregistrer dans album_downloads
-    await supabase.from('album_downloads').upsert({
-      album_id: albumId,
-      zip_file_path: zipName,
-      zip_file_size: zipBuffer.length,
-      generated_at: new Date().toISOString(),
-      status: 'ready',
-    }, {
-      onConflict: 'album_id' // ✅ STRING, pas tableau !
-    });
+    if (signError || !signed?.signedUrl) {
+      throw signError ?? new Error('Signed URL generation failed');
+    }
 
-    res.status(200).json({ downloadUrl: signed?.signedUrl });
+    // 🔹 Enregistrement en base
+    const { error: insertError } = await supabase
+      .from('album_downloads')
+      .upsert({
+        album_id: albumId,
+        zip_file_path: zipName,
+        zip_file_size: zipBuffer.length,
+        generated_at: new Date().toISOString(),
+        status: 'ready'
+      }, {
+        onConflict: 'album_id' // ✅ Doit être un string
+      });
+
+    if (insertError) throw insertError;
+
+    return res.status(200).json({ downloadUrl: signed.signedUrl });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to generate zip' });
+    console.error('⛔️ Zip generation failed:', err);
+    return res.status(500).json({ error: 'Failed to generate zip' });
   }
 }
