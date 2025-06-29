@@ -1,3 +1,5 @@
+// Force re-détection Git
+
 import type { VercelRequest, VercelResponse } from 'vercel';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
