@@ -5,5 +5,11 @@
       "src": "api/generate-zip.ts",
       "use": "@vercel/node"
     }
+  ],
+  "routes": [
+    {
+      "src": "/api/generate-zip",
+      "dest": "api/generate-zip.ts"
+    }
   ]
 }
