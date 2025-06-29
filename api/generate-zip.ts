@@ -1,5 +1,4 @@
-// Corrected and Vercel-compatible version of your generate-zip.ts
-import type { VercelRequest, VercelResponse } from 'vercel';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
 import { createClient } from '@supabase/supabase-js';
@@ -9,16 +8,15 @@ import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 
-// Ensure ffmpeg knows where to find the binary
+// Configure ffmpeg
 ffmpeg.setFfmpegPath(ffmpegPath!);
 
-// Supabase client setup with env vars
+// Initialise Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Vercel function entry point
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { albumId } = req.query;
 
@@ -53,13 +51,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const fileBuffer = Buffer.from(await wavFile.arrayBuffer());
       fs.writeFileSync(wavTempPath, fileBuffer);
 
-      await new Promise<void>((resolve, reject) => {
+      await new Promise((resolve, reject) => {
         ffmpeg(wavTempPath)
           .audioBitrate(192)
           .toFormat('mp3')
           .save(mp3TempPath)
-          .on('end', () => resolve())
-          .on('error', (err) => reject(err));
+          .on('end', resolve)
+          .on('error', reject);
       });
 
       zip.addLocalFile(mp3TempPath, '', `${track.track_number} - ${track.title}.mp3`);
@@ -67,6 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const zipBuffer = zip.toBuffer();
     const zipName = `${albumId}.zip`;
+
     const { error: uploadError } = await supabase.storage
       .from('archives')
       .upload(zipName, zipBuffer, {
@@ -78,19 +77,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: signed } = await supabase.storage
       .from('archives')
-      .createSignedUrl(zipName, 900); // valid 15 min
+      .createSignedUrl(zipName, 900); // 15 min
 
+    // Enregistrer dans album_downloads
     await supabase.from('album_downloads').upsert({
       album_id: albumId,
       zip_file_path: zipName,
       zip_file_size: zipBuffer.length,
       generated_at: new Date().toISOString(),
       status: 'ready',
-    }, { onConflict: ['album_id'] });
+    }, {
+      onConflict: 'album_id' // ✅ STRING, pas tableau !
+    });
 
-    return res.status(200).json({ downloadUrl: signed?.signedUrl });
+    res.status(200).json({ downloadUrl: signed?.signedUrl });
   } catch (err) {
-    console.error('Error generating ZIP:', err);
-    return res.status(500).json({ error: 'Failed to generate zip' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate zip' });
   }
 }
